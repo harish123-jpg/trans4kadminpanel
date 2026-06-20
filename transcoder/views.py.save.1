@@ -1,0 +1,645 @@
+from django.http import HttpResponse
+import time
+def fast_view(request):
+    return HttpResponse("Fast OK")
+
+
+from django.contrib import messages
+
+from django.shortcuts import redirect, render
+import psutil
+from django.contrib.auth.decorators import login_required
+from .forms import StreamForm
+from django.shortcuts import render, redirect
+from django.contrib.auth import authenticate, login, logout
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+
+def custom_login(request):
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+
+        user = authenticate(request, username=username, password=password)
+        if user is not None:
+            login(request, user)
+            return redirect('dashboard')  # Redirect to dashboard after successful login
+        else:
+            messages.error(request, 'Invalid username or password.')
+    
+    return render(request, 'transcoder/login.html')
+
+@login_required
+def custom_logout(request):
+    logout(request)
+    return redirect('login')  # Redirect to login after logout
+
+from django.http import JsonResponse
+import psutil
+from django.http import JsonResponse
+from .models import Stream
+import psutil
+'''
+def get_stream_status(request):
+    streams = Stream.objects.all()
+    status = {}
+
+    for stream in streams:
+        found = False
+        for p in psutil.process_iter(['pid', 'cmdline']):
+            try:
+                cmd = p.info['cmdline']
+                if cmd and stream.name in ' '.join(cmd):
+                    found = True
+                    break
+            except (psutil.ZombieProcess, psutil.AccessDenied, psutil.NoSuchProcess):
+                continue
+
+        status[stream.id] = found
+
+        # Optional DB update
+        if stream.is_running != found:
+            stream.is_running = found
+            stream.save(update_fields=["is_running"])
+
+    return JsonResponse(status)
+
+'''
+
+from django.http import JsonResponse
+
+@login_required
+def get_stream_status_view(request):
+    status = get_stream_status()  # Call your existing function
+    return JsonResponse(status)
+
+def get_stream_status():
+    streams = Stream.objects.all()
+    status = {}
+    
+    # Build list of all current cmdlines only once
+    all_cmds = []
+    for p in psutil.process_iter(['pid', 'cmdline']):
+        try:
+            cmd = ' '.join(p.info['cmdline']) if p.info['cmdline'] else ''
+            all_cmds.append(cmd)
+        except (psutil.ZombieProcess, psutil.AccessDenied, psutil.NoSuchProcess):
+            continue
+
+    streams_to_update = []
+
+    for stream in streams:
+        found = any(stream.name in cmd for cmd in all_cmds)
+        status[stream.id] = found
+
+        if stream.is_running != found:
+            stream.is_running = found
+            streams_to_update.append(stream)
+
+    # Bulk update
+    if streams_to_update:
+        Stream.objects.bulk_update(streams_to_update, ['is_running'])
+
+    return status
+
+
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import render
+from .models import Stream
+import psutil, GPUtil, shutil, subprocess
+import pynvml
+
+@login_required
+def dashboard(request):
+    start = time.time()
+    status=get_stream_status()
+    total = Stream.objects.count()
+    running = Stream.objects.filter(is_running=True).count()
+    stopped = total - running
+
+    cpu = psutil.cpu_percent(interval=1)
+    memory = psutil.virtual_memory().percent
+    disk = psutil.disk_usage('/').percent
+    load_avg_raw = psutil.getloadavg()
+    load_avg = [round(val, 2) for val in load_avg_raw]
+    try:
+        pynvml.nvmlInit()
+        gpu_count = pynvml.nvmlDeviceGetCount()
+        gpu_info = []
+        for i in range(gpu_count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+            name = pynvml.nvmlDeviceGetName(handle)  # FIXED: removed decode
+            mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+            enc_util = pynvml.nvmlDeviceGetEncoderUtilization(handle)
+            dec_util = pynvml.nvmlDeviceGetDecoderUtilization(handle)
+            temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+
+            gpu_info.append({
+                'name': name,
+                'load': f"{util.gpu}%",
+                'encoder_usage': f"{enc_util[0]}%",
+                'decoder_usage': f"{dec_util[0]}%",
+                'memory_used': f"{mem_info.used // (1024 * 1024)}MB",
+                'memory_total': f"{mem_info.total // (1024 * 1024)}MB",
+                'temperature': f"{temp}°C"
+            })
+        pynvml.nvmlShutdown()
+    except Exception as e:
+        print("GPU stats error:", e)
+        gpu_info = []
+
+    # Channel list & status
+    labels = list(Stream.objects.values_list('name', flat=True))
+    data = [1 if s.is_running else 0 for s in Stream.objects.all()]
+    print(f"Query took {time.time() - start:.2f} seconds")
+    context = {
+        'total': total,
+        'running': running,
+        'stopped': stopped,
+        'cpu': cpu,
+        'memory': memory,
+        'disk': disk,
+        'load_avg': load_avg,
+        'gpu_info': gpu_info,
+        'labels': labels,
+        'data': data,
+    }
+
+    return render(request, 'transcoder/dashboard.html', context)
+
+
+@login_required
+def dashboard_data(request):
+    get_stream_status()
+    total = Stream.objects.count()
+    running = Stream.objects.filter(is_running=True).count()
+    stopped = total - running
+
+    cpu = psutil.cpu_percent(interval=0.5)
+    memory = psutil.virtual_memory().percent
+    disk = psutil.disk_usage('/').percent
+    load_avg_raw = psutil.getloadavg()
+    load_avg = [round(val, 2) for val in load_avg_raw]
+
+    try:
+        pynvml.nvmlInit()
+        gpu_count = pynvml.nvmlDeviceGetCount()
+        gpu_info = []
+        for i in range(gpu_count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+            name = pynvml.nvmlDeviceGetName(handle).decode('utf-8')
+            mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+            enc_util = pynvml.nvmlDeviceGetEncoderUtilization(handle)
+            dec_util = pynvml.nvmlDeviceGetDecoderUtilization(handle)
+            temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+
+            gpu_info.append({
+                'name': name,
+                'load': util.gpu,
+                'encoder_usage': enc_util[0],
+                'decoder_usage': dec_util[0],
+                'memory_used': mem_info.used // (1024 * 1024),
+                'memory_total': mem_info.total // (1024 * 1024),
+                'temperature': temp
+            })
+        pynvml.nvmlShutdown()
+    except:
+        gpu_info = []
+
+    return JsonResponse({
+        'cpu': cpu, 'memory': memory, 'disk': disk, 'load_avg': load_avg,
+        'total': total, 'running': running, 'stopped': stopped,
+        'gpu_info': gpu_info
+    })
+
+import psutil
+from .models import Stream
+
+def update_stream_statuses():
+    # Get all current running process command lines
+    #process_cmds = [' '.join(p.info['cmdline']) for p in psutil.process_iter(['cmdline'])]
+    process_cmds = [' '.join(p.info['cmdline']) for p in psutil.process_iter(['cmdline']) if p.info['cmdline']]
+
+    for stream in Stream.objects.all():
+        is_running_now = any(stream.name in cmd for cmd in process_cmds)
+        if stream.is_running != is_running_now:
+            stream.is_running = is_running_now
+            stream.save(update_fields=['is_running'])
+
+
+from django.shortcuts import render
+from .models import Stream
+import subprocess
+from django.db.models import F
+
+@login_required
+def channel_list(request):
+    update_stream_statuses()
+
+    hls_channels = Stream.objects.filter(output_stream='HLS')
+    mpd_channels = Stream.objects.filter(output_stream='MPD')
+
+    return render(request, 'transcoder/channel_list.html', {
+        'hls_channels': hls_channels,
+        'mpd_channels': mpd_channels
+    })
+
+import os
+import stat
+import subprocess
+from django.conf import settings
+from django.http import HttpResponse
+
+
+
+start_udp_script = """
+
+#!/bin/bash
+
+wget http://localhost:1996/udp/[IPADDRESS] -O [CHANNELNAME] 2> /dev/null &
+sleep 2
+GET=`ps aux | grep -i wget | grep http://localhost:1996/udp/[IPADDRESS] | awk {'print $2'}`;
+kill -9 $GET
+
+file=[CHANNELNAME]
+minimumsize=25
+actualsize=$(wc -c <"$file")
+if [ $actualsize -ge $minimumsize ]; then
+    echo Stream is working
+else
+    ST=`ps aux | grep ffmpeg | grep udp://[IPADDRESS] | awk {'print $2'}`;
+    kill -9 $ST
+     /usr/local/bin/ffmpeg -hwaccel_device [GPU] -hwaccel cuvid -c:v [STREAMTYPE]_cuvid [DEINTERLACING] -resize [RESOLUTION] -i [STREAMSOURCE] [MAPPING] -c:v [OUTPUTCODEC]_nvenc -b:v [BITRATE] -maxrate:v [MAXBITRATE] -preset [PRESET] -r [FRAMERATE] -acodec [AUDIOCODEC] -b:a [AUDIOBITRATE] -af "volume=[AUDIOVOLUME]" -f mpegts udp://[IPADDRESS] 2> /var/log/stream/[CHANNELNAME].log &
+fi
+rm channelname
+
+"""
+
+start_rtp_script = """
+
+#!/bin/bash
+
+wget http://localhost:1996/rtp/[IPADDRESS] -O [CHANNELNAME] 2> /dev/null &
+sleep 2
+GET=`ps aux | grep -i wget | grep http://localhost:1996/rtp/[IPADDRESS] | awk {'print $2'}`;
+kill -9 $GET
+
+file=[CHANNELNAME]
+minimumsize=25
+actualsize=$(wc -c <"$file")
+if [ $actualsize -ge $minimumsize ]; then
+    echo Stream is working
+else
+    ST=`ps aux | grep ffmpeg | grep rtp://[IPADDRESS] | awk {'print $2'}`;
+    kill -9 $ST
+     /usr/local/bin/ffmpeg -hwaccel_device [GPU] -hwaccel cuvid -c:v [STREAMTYPE]_cuvid [DEINTERLACING] -resize [RESOLUTION] -i [STREAMSOURCE] [MAPPING] -c:v [OUTPUTCODEC]_nvenc -b:v [BITRATE] -maxrate:v [MAXBITRATE] -preset [PRESET] -r [FRAMERATE] -acodec [AUDIOCODEC] -b:a [AUDIOBITRATE] -af "volume=[AUDIOVOLUME]" -f mpegts rtp://[IPADDRESS] 2> /var/log/stream/[CHANNELNAME].log &
+fi
+rm channelname
+
+"""
+
+start_mp4_script = """
+
+#!/bin/bash
+FF =`ps ax | grep ffmpeg - i | grep [input-stream]`
+  if ["$FF" = ""]
+   then
+        /usr/local/bin/ffmpeg - hwaccel_device[GPU] - hwaccel cuvid - c: v[STREAMTYPE]_cuvid[DEINTERLACING] - resize[RESOLUTION] - i[STREAMSOURCE][MAPPING] - c: v[OUTPUTCODEC]_nvenc - b: v[BITRATE] - maxrate: v[MAXBITRATE] - preset[PRESET] - r[FRAMERATE] - acodec[AUDIOCODEC] - b: a[AUDIOBITRATE] - af "volume=[AUDIOVOLUME]" - f mpegts / var/www/vod /$channelname 2 > /var/log/stream/channel-name.log &
+    else
+    echo "Alive"
+    fi
+"""
+
+
+start_hls_script = """    #!/bin/sh
+
+   # Input file
+   FILE=/var/www/html/live/[STREAMNAME].m3u8
+
+   #Check if file alreay exists if not create it and wait for 10 sec's
+   if test -f "$FILE"; then
+       echo "$FILE exist"
+   else
+      touch $FILE
+      sleep 10
+   fi
+
+   # How many seconds before file is deemed "older"
+   OLDTIME=9
+   # Get current and file times
+   CURTIME=$(date +%s)
+   FILETIME=$(stat $FILE -c %Y)
+   TIMEDIFF=$(expr $CURTIME - $FILETIME)
+
+   # Check if file older
+   if [ $TIMEDIFF -gt $OLDTIME ]; then
+       ST=`ps aux | grep ffmpeg | grep  /var/www/html/live/[STREAMNAME].m3u8 | awk {'print $2'}`;
+       if [ ! -z "$ST" ] 
+       then
+           kill -9 $ST
+       fi    
+       /usr/local/bin/ffmpeg -fflags nobuffer+discardcorrupt -flags low_delay -err_detect ignore_err -analyzeduration 500000 -probesize 500000 -hwaccel_device [GPU] -hwaccel_output_format cuda -hwaccel cuda -extra_hw_frames 2 -c:v [STREAMTYPE]_cuvid [DEINTERLACING] -resize [RESOLUTION] -i [STREAMSOURCE] [MAPPING] -c:v [OUTPUTCODEC]_nvenc -b:v [BITRATE] -maxrate [MAXBITRATE] -bufsize 2000k -g 50 -keyint_min 50 -sc_threshold 0 -preset [PRESET] -r [FRAMERATE] -threads 1 -c:a [AUDIOCODEC] -b:a [AUDIOBITRATE] -ar 48000 -hls_time 4 -hls_list_size 6 -hls_flags delete_segments+append_list -use_wallclock_as_timestamps 1 -avoid_negative_ts make_zero -f hls /var/www/html/live/[STREAMNAME].m3u8 2> /var/log/stream/[STREAMNAME].log &
+       echo "stream is down $(date '+%d/%m/%Y %H:%M:%S')" >> /opt/stream/report/[STREAMNAME]-down.txt &
+   else
+      echo "stream is working $(date '+%d/%m/%Y %H:%M:%S')" >> /opt/stream/report/[STREAMNAME]-up.txt
+     /usr/bin/mediainfo /var/www/html/live/[STREAMNAME].m3u8 > /opt/stream/info/[STREAMNAME].txt
+   fi
+
+   IS_STARTED=`ps aux | grep ffmpeg | grep  /var/www/html/live/[STREAMNAME].m3u8 | awk {'print $2'}`;
+   if [ ! -z "$IS_STARTED" ]
+   then
+      exit 0
+   else
+      exit 1
+   fi
+   """
+
+
+start_mpd_script = """    #!/bin/sh
+
+   # Input file
+   FILE=/var/www/html/live/[STREAMNAME].mpd
+
+   #Check if file alreay exists if not create it and wait for 10 sec's
+   if test -f "$FILE"; then
+       echo "$FILE exist"
+   else
+      touch $FILE
+      sleep 10
+   fi
+
+   # How many seconds before file is deemed "older"
+   OLDTIME=9
+   # Get current and file times
+   CURTIME=$(date +%s)
+   FILETIME=$(stat $FILE -c %Y)
+   TIMEDIFF=$(expr $CURTIME - $FILETIME)
+
+   # Check if file older
+   if [ $TIMEDIFF -gt $OLDTIME ]; then
+       ST=`ps aux | grep ffmpeg | grep  /var/www/html/live/[STREAMNAME].mpd | awk {'print $2'}`;
+       if [ ! -z "$ST" ] 
+       then
+           kill -9 $ST
+       fi    
+       /usr/local/bin/ffmpeg -fflags +discardcorrupt+nobuffer -err_detect ignore_err -analyzeduration 500000 -probesize 500000 -hwaccel cuda -hwaccel_output_format cuda -c:v [STREAMTYPE]_cuvid [DEINTERLACING] -resize [RESOLUTION] -i [STREAMSOURCE] [MAPPING] -c:v [OUTPUTCODEC]_nvenc -preset [PRESET] -b:v [BITRATE] -maxrate [MAXBITRATE] -bufsize 3000k -g 50 -keyint_min 50 -sc_threshold 0 -r [FRAMERATE]  -c:a [AUDIOCODEC] -b:a [AUDIOBITRATE] -ar 48000 -af "volume=[AUDIOVOLUME]dB" -f dash -seg_duration 4 -streaming 1 -window_size 5 -extra_window_size 5 -remove_at_exit 1 /var/www/html/live/[STREAMNAME].mpd 2> /var/log/stream/[STREAMNAME].log &
+      echo "stream is down $(date '+%d/%m/%Y %H:%M:%S')" >> /opt/stream/report/[STREAMNAME]-down.txt &
+   else
+      echo "stream is working $(date '+%d/%m/%Y %H:%M:%S')" >> /opt/stream/report/[STREAMNAME]-up.txt
+     /usr/bin/mediainfo /var/www/html/live/[STREAMNAME].mpd > /opt/stream/info/[STREAMNAME].txt
+   fi
+
+   IS_STARTED=`ps aux | grep ffmpeg | grep  /var/www/html/live/[STREAMNAME].mpd | awk {'print $2'}`;
+   if [ ! -z "$IS_STARTED" ]
+   then
+      exit 0
+   else
+      exit 1
+   fi
+   """
+
+def generate_script(payload):
+    print("Generating script now...")
+    output_stream = payload['output_stream']
+    stream_name = payload['name']
+    
+    stream_type = payload['stream_type'].lower()
+    if stream_type == 'h265':
+        stream_type = 'hevc' 
+    output_codec = payload['output_codec'].lower()
+    if output_codec == 'h265':
+        output_codec = 'hevc'
+
+    # script path define
+    script_dir = "/opt/stream/"
+
+    # HLS ka file name normal
+    if output_stream == "HLS":
+        script_name = f"{stream_name}.sh"
+    elif output_stream == "MPD":
+    # If already has _MPD, don't add it again
+        if not stream_name.endswith("_MPD"):
+            stream_name = f"{stream_name}_MPD"
+        script_name = f"{stream_name}.sh"
+    else:
+        script_name = f"{stream_name}_{output_stream}.sh"
+
+    script_path = os.path.join(script_dir, script_name)
+    is_cpu_transcode = payload.get('gpu', '') in ['', 'none', 'None', None, '0'] and payload.get('force_cpu', False)
+    # Select correct base script template
+    if output_stream == "UDP":
+        #script_template = start_udp_scrip
+    elif output_stream == "RTP":
+        script_template = start_rtp_script
+    elif output_stream == "MP4":
+        script_template = start_mp4_script
+    elif output_stream == "TS":
+        if payload['stream_source'].startswith("udp"):
+            script_template = start_udp_script
+        elif payload['stream_source'].startswith("rtp"):
+            script_template = start_rtp_script
+    elif output_stream == "MPD":
+        script_template = start_mpd_script
+    else:
+        script_template = start_hls_script
+
+    # Replace all placeholders
+    keys_to_replace = {
+        '[STREAMNAME]': stream_name,
+        '[STREAMTYPE]': stream_type,
+        '[RESOLUTION]': payload['resolution'],
+        '[STREAMSOURCE]': payload['source'],
+        '[OUTPUTCODEC]': output_codec,
+        '[BITRATE]': payload['bitrate'],
+        '[MAXBITRATE]': payload['max_bitrate'],
+        '[PRESET]': payload['preset'],
+        '[FRAMERATE]': str(payload['frame_rate']),
+        '[GPU]': str(payload['gpu']),
+        '[DEINTERLACING]': payload.get('deinterlacing', ''),
+        '[MAPPING]': payload.get('mapping', ''),
+        '[AUDIOCODEC]': payload['audio_codec'].lower(),
+        '[AUDIOBITRATE]': payload['audio_bitrate'],
+        '[AUDIOVOLUME]': str(payload['audio_volume']),
+        '[IPADDRESS]': payload.get('ip_address', '180.188.254.253')
+    }
+
+    for key, value in keys_to_replace.items():
+        script_template = script_template.replace(key, str(value if value is not None else ''))
+
+    # Write to file
+    with open(script_path, 'w') as f:
+        f.write(script_template)
+
+    # Make it executable
+    os.chmod(script_path, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+
+    return script_path
+
+
+def add_stream(request):
+    if request.method == 'POST':
+        form = StreamForm(request.POST)
+        if form.is_valid():
+            stream_obj = form.save()
+            payload = form.cleaned_data
+            if payload['output_stream'] == "MPD" and not stream_obj.name.endswith("_MPD"):
+                stream_obj.name = f"{stream_obj.name}_MPD"
+            if payload['stream_type'] == 'h265':
+                stream_obj.stream_type = 'hevc'
+            stream_obj.save()
+            payload['name'] = stream_obj.name
+            payload['stream_type'] = stream_obj.stream_type
+            # generate script
+            script_path = generate_script(payload)
+
+            # run the script
+            try:
+                subprocess.run(script_path, shell=True, check=True)
+            except subprocess.CalledProcessError as e:
+                print("Stream start failed", e)
+                return HttpResponse(f"Stream failed: {e}")
+
+            messages.success(request, 'Stream Added & Started Successfully!')
+            return redirect('dashboard')
+        else:
+            messages.error(request, 'Please fix the errors below.')
+    else:
+        form = StreamForm()
+
+    return render(request, 'transcoder/add_stream.html', {'form': form,'errors': form.errors})
+
+
+
+@login_required
+def edit_stream(request, pk):
+    stream_obj = get_object_or_404(Stream, pk=pk)
+
+    if request.method == 'POST':
+        form = StreamForm(request.POST, instance=stream_obj)
+        if form.is_valid():
+            updated_stream = form.save(commit=False)
+            payload = form.cleaned_data
+
+            # If MPD stream — append _MPD once
+            if payload['output_stream'] == "MPD" and not updated_stream.name.endswith("_MPD"):
+                updated_stream.name = f"{updated_stream.name}_MPD"
+
+            # Update stream_type if needed
+            if payload['stream_type'] == 'h265':
+                updated_stream.stream_type = 'hevc'
+
+            updated_stream.save()
+
+            # Update payload for script generation
+            payload['name'] = updated_stream.name
+            payload['stream_type'] = updated_stream.stream_type
+
+            # generate new script with updated details
+            script_path = generate_script(payload)
+            os.chmod(script_path, 0o755)
+            '''
+            # run the updated stream script
+            try:
+                result = subprocess.run(
+                    f"bash {script_path}",
+                    shell=True,
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+            except subprocess.CalledProcessError as e:
+                print("Stream start failed:", e.stderr)
+                return HttpResponse(f"Stream failed:<br><pre>{e.stderr}</pre>")
+            '''
+            try:
+                # run the updated stream script in background
+                subprocess.Popen(f"bash {script_path} > /dev/null 2>&1 &",shell=True)
+            except Exception as e:
+                print("Stream start failed:", str(e))
+                return HttpResponse(f"Stream failed:<br><pre>{e}</pre>")
+            messages.success(request, 'Stream Updated & Started Successfully!')
+            return redirect('channel_list')
+        else:
+            messages.error(request, 'Please fix the errors below.')
+    else:
+        form = StreamForm(instance=stream_obj)
+
+    return render(request, 'transcoder/add_stream.html', {'form': form, 'stream': stream_obj})
+
+
+
+from django.shortcuts import get_object_or_404, redirect
+from django.contrib import messages
+import subprocess
+import os
+
+def play_stream(request, id):
+    stream = get_object_or_404(Stream, id=id)
+    if not stream.is_running:
+        script_path = f"/opt/stream/{stream.name}.sh"
+        subprocess.run(f"bash {script_path}", shell=True)
+        stream.is_running = True
+        stream.save()
+        messages.success(request, f"Stream '{stream.name}' started.")
+    return redirect('channel_list')
+
+def stop_stream(request, id):
+    stream = get_object_or_404(Stream, id=id)
+    if stream.is_running:
+        try:
+            print(f"Stopping stream: {stream.name}")
+
+            # Check if process exists
+            subprocess.run(f"pgrep -f '{stream.name}'", shell=True, check=True)
+
+            # Kill the process
+            subprocess.run(f"pkill -f '/opt/stream/{stream.name}.sh'", shell=True)
+            subprocess.run(f"sudo /usr/bin/pkill -f '{stream.name}'", shell=True)
+
+            # Update status
+            stream.is_running = False
+            stream.save()
+            messages.success(request, f"Stream '{stream.name}' stopped.")
+
+        except subprocess.CalledProcessError:
+            messages.error(request, f"Stream process for '{stream.name}' not found.")
+        except Exception as e:
+            print("Error stopping stream:", e)
+            messages.error(request, f"Failed to stop stream '{stream.name}'.")
+    else:
+        messages.info(request, f"Stream '{stream.name}' is already stopped.")
+    
+    return redirect('channel_list')
+'''
+def delete_stream(request, id):
+    stream = get_object_or_404(Stream, id=id)
+    subprocess.run(f"rm -f /opt/stream/{stream.name}.sh", shell=True)
+    stream.delete()
+    messages.success(request, "Stream deleted.")
+    return redirect('channel_list')
+'''
+
+def delete_stream(request, id):
+    stream = get_object_or_404(Stream, id=id)
+
+    try:
+        # Kill the process if running
+        subprocess.run(f"sudo /usr/bin/pkill -f '{stream.name}'", shell=True)
+
+        # Delete the stream script file
+        subprocess.run(f"rm -f /opt/stream/{stream.name}.sh", shell=True)
+
+        # Delete the DB entry
+        stream.delete()
+
+        messages.success(request, f"Stream '{stream.name}' stopped and deleted successfully.")
+
+    except Exception as e:
+        print("Error deleting stream:", e)
+        messages.error(request, f"Failed to delete stream '{stream.name}'.")
+
+    return redirect('channel_list')
+

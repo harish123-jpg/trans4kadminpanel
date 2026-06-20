@@ -1,0 +1,313 @@
+{% extends 'transcoder/base.html' %}
+
+{% block content %}
+
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-3xl font-bold text-white">📺 Channel List</h2>
+  <div class="space-x-3">
+    <a href="{% url 'add_stream' %}" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg">+ Add Channels</a>
+  </div>
+</div>
+
+<!-- Search Bar and Status Filter -->
+<div class="flex items-center mb-4 space-x-4">
+  <input id="search-bar" type="text" class="w-full p-2 border border-gray-700 bg-gray-700 text-white placeholder-gray-300 rounded-md" placeholder="Search channels...">
+
+  <!-- Status Filter Dropdown -->
+  <select id="status-filter" class="p-2 border border-gray-700 rounded-md">
+    <option value="">All Status</option>
+    <option value="running">Running</option>
+    <option value="stopped">Stopped</option>
+  </select>
+
+<!-- GPU Filter Dropdown -->
+<select id="gpu-filter" class="p-2 border border-gray-700 rounded-md">
+  <option value="">All GPU Types</option>
+  <option value="cpu">CPU</option>
+  <option value="gpu0">GPU 0</option>
+  <option value="gpu1">GPU 1</option>
+</select>
+</div>
+
+
+<!-- HLS Channels -->
+<h3 class="text-2xl font-semibold text-white mb-4">📡 HLS Channels</h3>
+
+<div class="overflow-x-auto">
+  <table id="hls-channel-table" class="w-full text-left text-gray-300 border border-gray-700 rounded-lg">
+    <thead class="bg-gray-800">
+      <tr>
+        <th class="px-4 py-3 border-b border-gray-600">Sno</th>
+        <th class="px-4 py-3 border-b border-gray-600">Stream Name</th>
+        <th class="px-4 py-3 border-b border-gray-600">Status</th>
+        <th class="px-4 py-3 border-b border-gray-600">Source</th>
+        <th class="px-4 py-3 border-b border-gray-600">GPU</th>
+        <th class="px-4 py-3 border-b border-gray-600">Resolution</th>
+        <th class="px-4 py-3 border-b border-gray-600">Output Codec</th>
+        <th class="px-4 py-3 border-b border-gray-600">Max Bitrate</th>
+        <th class="px-4 py-3 border-b border-gray-600">Audio Codec</th>
+        <th class="px-4 py-3 border-b border-gray-600">Audio Bitrate</th>
+        <th class="px-4 py-3 border-b border-gray-600">Play/Stop</th>
+        <th class="px-4 py-3 border-b border-gray-600">Remove</th>
+        <th class="px-4 py-3 border-b border-gray-600">Edit</th>
+        <th class="px-4 py-3 border-b border-gray-600">Output URL</th>
+      </tr>
+    </thead>
+    <tbody id="hls-channel-body">
+      {% for ch in hls_channels %}
+      <tr class="channel-row border-b border-gray-700 hover:bg-gray-800">
+        <td class="px-4 py-2">{{ forloop.counter }}</td>
+        <td class="px-4 py-2">{{ ch.name }}</td>
+        <td class="px-4 py-2 status-cell" id="status-{{ ch.id }}">
+          {% if ch.is_running %}
+            <svg class="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+              <circle cx="10" cy="10" r="5"></circle>
+            </svg>
+          {% else %}
+            <svg class="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+              <circle cx="10" cy="10" r="5"></circle>
+            </svg>
+          {% endif %}
+        </td>
+        <td class="px-4 py-2">{{ ch.source }}</td>
+        <td class="px-4 py-2 gpu-cell ">
+         {% if ch.gpu is None %}
+            CPU
+         {% else %}
+           {{ ch.gpu }}
+         {% endif %}
+        </td>
+
+        <td class="px-4 py-2">{{ ch.resolution }}</td>
+        <td class="px-4 py-2">{{ ch.output_codec }}</td>
+        <td class="px-4 py-2">{{ ch.max_bitrate }}</td>
+        <td class="px-4 py-2">{{ ch.audio_codec }}</td>
+        <td class="px-4 py-2">{{ ch.audio_bitrate }}</td>
+        <td class="px-4 py-2">
+          {% if ch.is_running %}
+             <!-- Show STOP icon when running -->
+             <a id="toggle-btn-{{ ch.id }}" href="{% url 'stop_stream' ch.id %}" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">
+                ⏹️
+             </a>
+
+          {% else %}
+             <!-- Show PLAY icon when stopped -->
+             <a id="toggle-btn-{{ ch.id }}" href="{% url 'play_stream' ch.id %}" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded">
+                ▶️
+             </a>
+          {% endif %}
+        </td>
+
+        <td class="px-4 py-2">
+          <a href="{% url 'delete_stream' ch.id %}" onclick="return confirm('Delete this stream?');"
+             class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded">🗑️</a>
+        </td>
+        <td class="px-4 py-2">
+          <a href="{% url 'edit_stream' ch.id %}" class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded">✏️</a>
+        </td>
+        <td class="px-4 py-2 text-blue-400 underline">http://180.188.254.253/live/{{ ch.name }}.m3u8</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="14" class="text-center text-gray-400 p-4">No HLS channels found.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- MPD Channels -->
+<h3 class="text-2xl font-semibold text-white mt-8 mb-4">🎛️ MPD Channels </h3>
+
+<div class="overflow-x-auto">
+  <table id="mpd-channel-table" class="w-full text-left text-gray-300 border border-gray-700 rounded-lg">
+    <thead class="bg-gray-800">
+      <tr>
+        <th class="px-4 py-3 border-b border-gray-600">Stream Name</th>
+        <th class="px-4 py-3 border-b border-gray-600">Status</th>
+        <th class="px-4 py-3 border-b border-gray-600">Source</th>
+        <th class="px-4 py-3 border-b border-gray-600">GPU</th>
+        <th class="px-4 py-3 border-b border-gray-600">Resolution</th>
+        <th class="px-4 py-3 border-b border-gray-600">Output Codec</th>
+        <th class="px-4 py-3 border-b border-gray-600">Max Bitrate</th>
+        <th class="px-4 py-3 border-b border-gray-600">Audio Codec</th>
+        <th class="px-4 py-3 border-b border-gray-600">Audio Bitrate</th>
+        <th class="px-4 py-3 border-b border-gray-600">Play/Stop</th>
+        <th class="px-4 py-3 border-b border-gray-600">Remove</th>
+        <th class="px-4 py-3 border-b border-gray-600">Edit</th>
+        <th class="px-4 py-3 border-b border-gray-600">Output URL</th>
+      </tr>
+    </thead>
+
+    <tbody id="mpd-channel-body">
+           {% if mpd_channels %}
+
+      {% for ch in mpd_channels %}
+      <tr class="channel-row border-b border-gray-700 hover:bg-gray-800">
+        <td class="px-4 py-2">{{ ch.name }}</td>
+        <td class="px-4 py-2 status-cell" id="status-{{ ch.id }}">
+          {% if ch.is_running %}
+            <svg class="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+              <circle cx="10" cy="10" r="5"></circle>
+            </svg>
+          {% else %}
+            <svg class="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+              <circle cx="10" cy="10" r="5"></circle>
+            </svg>
+          {% endif %}
+        </td>
+        <td class="px-4 py-2">{{ ch.source }}</td>
+        <td class="px-4 py-2">{{ ch.gpu }}</td>
+        <td class="px-4 py-2">{{ ch.resolution }}</td>
+        <td class="px-4 py-2">{{ ch.output_codec }}</td>
+        <td class="px-4 py-2">{{ ch.max_bitrate }}</td>
+        <td class="px-4 py-2">{{ ch.audio_codec }}</td>
+        <td class="px-4 py-2">{{ ch.audio_bitrate }}</td>
+        <td class="px-4 py-2">
+          {% if ch.is_running %}
+             <!-- Show STOP icon when running -->
+             <a id="toggle-btn-{{ ch.id }}" href="{% url 'stop_stream' ch.id %}" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">
+                ⏹️
+             </a>
+
+          {% else %}
+             <!-- Show PLAY icon when stopped -->
+             <a id="toggle-btn-{{ ch.id }}" href="{% url 'play_stream' ch.id %}" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded">
+                ▶️
+             </a>
+          {% endif %}
+        </td>
+
+        <td class="px-4 py-2">
+          <a href="{% url 'delete_stream' ch.id %}" onclick="return confirm('Delete this stream?');"
+             class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded">🗑️</a>
+        </td>
+        <td class="px-4 py-2">
+          <a href="{% url 'edit_stream' ch.id %}" class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded">✏️</a>
+        </td>
+        <td class="px-4 py-2 text-blue-400 underline">http://180.188.254.253/live/{{ ch.name }}.mpd</td>
+      </tr>
+      {% endfor %}
+      {% else %}
+      <tr><td colspan="14" class="text-center text-gray-400 p-4">No MPD channels found.</td></tr>
+      {% endif %}
+
+    </tbody>
+
+  </table>
+</div>
+
+<script>
+  // Existing setInterval script to fetch stream status periodically
+  setInterval(() => {
+    fetch("{% url 'get_stream_status' %}")
+      .then(response => response.json())
+      .then(data => {
+        for (const [id, isRunning] of Object.entries(data)) {
+          const statusBadge = document.getElementById("status-" + id);
+          //const startBtn = document.getElementById("start-btn-" + id);
+          //const stopBtn = document.getElementById("stop-btn-" + id);
+          const toggleBtn = document.getElementById("toggle-btn-" + id);
+
+          if (statusBadge) {
+            // Update the class and icon based on the status
+            statusBadge.innerHTML = isRunning
+              ? '<svg class="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="5"></circle></svg>'
+              : '<svg class="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="5"></circle></svg>';
+          }
+
+          // Optionally handle enabling/disabling start/stop buttons
+          /*if (startBtn) {
+            startBtn.disabled = isRunning;
+          }
+          if (stopBtn) {
+            stopBtn.disabled = !isRunning;
+          }*/
+if (toggleBtn) {
+    if (isRunning) {
+        toggleBtn.innerHTML = "⏹️";
+        toggleBtn.href = "/stream/stop/" + id + "/";
+        toggleBtn.className = "bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded";
+    } else {
+        toggleBtn.innerHTML = "▶️";
+        toggleBtn.href = "/stream/play/" + id + "/";
+        toggleBtn.className = "bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded";
+    }
+}
+        }
+      });
+  }, 3000); // Update every 5 seconds
+
+
+// Search and Status Filter functionality
+document.getElementById("search-bar").addEventListener("input", filterChannels);
+document.getElementById("status-filter").addEventListener("change", filterChannels);
+document.getElementById("gpu-filter").addEventListener("change", filterChannels);
+
+function filterChannels() {
+  const searchValue = document.getElementById("search-bar").value.toLowerCase();
+  const statusFilter = document.getElementById("status-filter").value;
+  const gpuFilter = document.getElementById("gpu-filter").value;
+
+  const rows = document.querySelectorAll(".channel-row");
+
+  rows.forEach(row => {
+    const nameCell = row.querySelector("td:nth-child(2)");
+    const statusIcon = row.querySelector(".status-cell svg");
+    const gpuCell = row.querySelector(".gpu-cell");
+
+    if (!nameCell || !gpuCell || !statusIcon) return;
+
+    const channelName = nameCell.textContent.toLowerCase();
+    const gpuText = gpuCell.textContent.trim(); // either "0", "1", or "" (CPU)
+    const isRunning = statusIcon.classList.contains('text-green-500');
+    const isStopped = statusIcon.classList.contains('text-red-500');
+
+    const matchesSearch = channelName.includes(searchValue);
+    const matchesStatus =
+      statusFilter === "" ||
+      (statusFilter === "running" && isRunning) ||
+      (statusFilter === "stopped" && isStopped);
+
+    let matchesGpu = true;
+    if (gpuFilter === "cpu") {
+      matchesGpu = gpuText === "" || gpuText === "None" || gpuText === "CPU";
+    } else if (gpuFilter === "gpu0") {
+      matchesGpu = gpuText === "0";
+    } else if (gpuFilter === "gpu1") {
+      matchesGpu = gpuText === "1";
+    }
+
+    row.style.display = (matchesSearch && matchesStatus && matchesGpu) ? "" : "none";
+  });
+}
+
+
+
+
+// Sort channels alphabetically by stream name
+function sortTable(tableId) {
+  const rows = Array.from(document.querySelectorAll(`#${tableId} tbody tr`));
+
+  const sortedRows = rows.sort((a, b) => {
+    const nameA = a.querySelector("td:nth-child(2)").textContent.toLowerCase();
+    const nameB = b.querySelector("td:nth-child(2)").textContent.toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+
+  const tbody = document.querySelector(`#${tableId} tbody`);
+  sortedRows.forEach((row, index) => {
+    // Update S.No
+    row.querySelector("td:nth-child(1)").textContent = index + 1;
+    tbody.appendChild(row);
+  });
+}
+
+
+  // Call sortTable on page load for both HLS and MPD tables
+  window.onload = () => {
+    sortTable('hls-channel-table');
+    sortTable('mpd-channel-table');
+  };
+</script>
+
+{% endblock %}
+

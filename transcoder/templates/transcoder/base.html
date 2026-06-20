@@ -1,0 +1,41 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Transcoder Panel</title>
+<script src="https://cdn.tailwindcss.com"></script>
+    <style>
+  select {
+    background-color: #1f2937; /* Tailwind gray-800 */
+    color: #fff;
+    border-color: #4b5563; /* Tailwind gray-600 */
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+  }
+</style>
+</head>
+<body class="bg-gray-900 text-white">
+
+<!-- Navbar -->
+<nav class="bg-gray-800 shadow">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+    <div class="flex items-center space-x-6">
+      <a href="/" class="text-2xl font-bold text-white">Transcoder Panel</a>
+      <a href="{% url 'dashboard' %}" class="text-gray-300 hover:text-white">📊 Dashboard</a>
+      <a href="{% url 'channel_list' %}" class="text-gray-300 hover:text-white">📺 Channels</a>
+    </div>
+    <div>
+      <a href="{% url 'logout' %}" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">Logout</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Main Content -->
+<div class="max-w-7xl mx-auto px-4 py-8">
+  {% block content %}{% endblock %}
+</div>
+
+</body>
+</html>
+

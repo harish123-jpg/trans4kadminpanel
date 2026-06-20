@@ -1,0 +1,169 @@
+{% extends 'transcoder/base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto bg-gray-900 text-gray-200 p-6 rounded-xl shadow-xl mt-10">
+
+  <h2 class="text-2xl font-bold mb-8">📺 Video Settings</h2>
+
+  <form method="post" id="streamForm" class="space-y-6">
+    {% csrf_token %}
+
+    <!-- Name -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Name *</label>
+      <input type="text" name="name" value="{{ form.name.value|default_if_none:'' }}"
+        class="w-1/2 bg-gray-800 text-white border border-gray-700 rounded px-3 py-2" placeholder="AAJTAKHD">
+    </div>
+
+    <!-- Source -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Source *</label>
+      <input type="text" name="source" value="{{ form.source.value|default_if_none:'' }}"
+        class="w-1/2 bg-gray-800 text-white border border-gray-700 rounded px-3 py-2" placeholder="udp://238.1.1.1:5000">
+    </div>
+
+    <!-- Mapping -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Mapping</label>
+      <input type="text" name="mapping" value="{{ form.mapping.value|default_if_none:'' }}"
+        class="w-1/2 bg-gray-800 text-white border border-gray-700 rounded px-3 py-2" placeholder="0:v:0">
+    </div>
+
+<!-- Transcoder Type -->
+<div class="flex items-center gap-4">
+  <label class="w-40">Transcode With *</label>
+  <select name="transcoder_type" id="id_transcoder_type"
+          class="w-1/2 bg-gray-800 text-white border border-gray-700 rounded px-3 py-2"
+          onchange="toggleGPUField(this)">
+    <option value="gpu" selected>GPU</option>
+    <option value="cpu">CPU</option>
+  </select>
+</div>
+
+
+    <!-- GPU -->
+    <div class="flex items-center gap-4" id="gpuField">
+      <label class="w-40">GPU *</label>
+      <input type="number" name="gpu" value="{{ form.gpu.value|default_if_none:'' }}"
+        class="w-1/2 bg-gray-800 text-white border border-gray-700 rounded px-3 py-2" placeholder="0 or 1">
+      <!-- Hidden field to pass CPU override flag -->
+<input type="hidden" name="force_cpu" id="id_force_cpu" value="false">
+
+    </div>
+
+    <!-- Deinterlacing -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Deinterlacing</label>
+      <input type="text" name="deinterlacing" value="{{ form.deinterlacing.value|default_if_none:'' }}"
+        class="w-1/2 bg-gray-800 text-white border border-gray-700 rounded px-3 py-2" placeholder="yadif">
+    </div>
+
+    <!-- Resolution -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Resolution *</label>
+      <input type="text" name="resolution" value="{{ form.resolution.value|default_if_none:'' }}"
+        class="w-1/2 bg-gray-800 text-white border border-gray-700 rounded px-3 py-2" placeholder="1280x720">
+    </div>
+
+    <!-- Min Bitrate -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Min Bitrate *</label>
+      <input type="text" name="bitrate" value="{{ form.bitrate.value|default_if_none:'' }}"
+        class="w-1/2 bg-gray-800 text-white border border-gray-700 rounded px-3 py-2" placeholder="1500k">
+    </div>
+
+    <!-- Max Bitrate -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Max Bitrate *</label>
+      <input type="text" name="max_bitrate" value="{{ form.max_bitrate.value|default_if_none:'' }}"
+        class="w-1/2 bg-gray-800 text-white border border-gray-700 rounded px-3 py-2" placeholder="2000k">
+    </div>
+
+    <!-- Stream Type -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Stream Type *</label>
+      <div class="w-1/2">{{ form.stream_type }}</div>
+    </div>
+
+    <!-- Output Stream -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Output Stream *</label>
+      <div class="w-1/2">{{ form.output_stream }}</div>
+    </div>
+
+    <!-- Output Codec -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Output Codec *</label>
+      <div class="w-1/2">{{ form.output_codec }}</div>
+    </div>
+
+    <!-- Preset -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Preset *</label>
+      <div class="w-1/2">{{ form.preset }}</div>
+    </div>
+
+    <!-- Frame Rate -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Frame Rate *</label>
+      <input type="text" name="frame_rate" value="{{ form.frame_rate.value|default_if_none:'' }}"
+        class="w-1/2 bg-gray-800 text-white border border-gray-700 rounded px-3 py-2" placeholder="25">
+    </div>
+
+<hr class="my-10 border-gray-700">
+
+    <!-- Audio Settings Heading -->
+    <h2 class="text-2xl font-bold mt-10 mb-4">🎵 Audio Settings</h2>
+
+    <!-- Audio Volume -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Audio Volume *</label>
+      <input type="number" name="audio_volume" value="{{ form.audio_volume.value|default_if_none:'' }}"
+        class="w-1/2 bg-gray-800 text-white border border-gray-700 rounded px-3 py-2" placeholder="5">
+    </div>
+
+    <!-- Audio Bitrate -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Audio Bitrate *</label>
+      <input type="text" name="audio_bitrate" value="{{ form.audio_bitrate.value|default_if_none:'' }}"
+        class="w-1/2 bg-gray-800 text-white border border-gray-700 rounded px-3 py-2" placeholder="128k">
+    </div>
+
+    <!-- Audio Codec -->
+    <div class="flex items-center gap-4">
+      <label class="w-40">Audio Codec *</label>
+      <div class="w-1/2">{{ form.audio_codec }}</div>
+    </div>
+
+    <!-- Submit Buttons -->
+    <div class="flex gap-4 mt-8">
+      <button type="submit"
+        class="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg">🚀 Start</button>
+      <a href="{% url 'dashboard' %}"
+        class="bg-red-600 hover:bg-red-700 text-white font-semibold px-6 py-3 rounded-lg">❌ Cancel</a>
+    </div>
+
+  </form>
+</div>
+<script>
+function toggleGPUField(select) {
+  const gpuField = document.getElementById('gpuField');
+  const forceCpuField = document.getElementById('id_force_cpu');
+
+  if (select.value === 'cpu') {
+    gpuField.style.display = 'none';
+    forceCpuField.value = 'true';
+  } else {
+    gpuField.style.display = 'flex';
+    forceCpuField.value = 'false';
+  }
+}
+
+window.onload = function() {
+  toggleGPUField(document.getElementById('id_transcoder_type'));
+};
+</script>
+
+{% endblock %}
+
